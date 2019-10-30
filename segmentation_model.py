@@ -1,0 +1,177 @@
+"""
+Class defining the fusion model architecture
+Option to build fusion, m-mode only, or d-mode only
+"""
+
+from keras.models import Model
+from keras.losses import categorical_crossentropy
+from keras.layers import Input, Conv2D, MaxPooling2D, Dropout, UpSampling2D, concatenate
+from keras import optimizers, regularizers
+import keras.backend as K
+from keras.callbacks import ModelCheckpoint, LearningRateScheduler, TensorBoard, EarlyStopping
+import numpy as np
+import glob
+import os
+
+from data_generator import DataGenerator
+
+
+class BinaryModel:
+    # class defining the multilabel model.
+    # functions for defining the model, training, and prediction
+    # model type can be resnet, inception, or mobilenet
+
+    def __init__(self, model_type='mobilenet', n_trainable_layers=1, feature='effusion',
+                 image_params=None, mask=None, custom_loss=False):
+        self.classes = [feature, 'no_' + feature]
+
+        # Define custom loss
+        def positional_prior_categorical_crossentropy(mask, layer):
+            """
+            cross-entropy loss with position-based penalty for weights
+            of the form L' = L + sumij(lambda(i,j) * sumk(w(i,j,k)))
+            where lambda(i,j) is the positional penalty and w(i,j,k) are the outputs of the final convolutional layer
+            :param y: true label
+            :param y_pred: predicted label
+            :param mask: position-based weights for penalty
+            :return: loss
+            """
+
+            def regularized_loss(y_true, y_pred):
+                # start with basic cross-entropy loss
+                loss = categorical_crossentropy(y_true, y_pred)
+                # build the regularization term - sum squared output across features
+                w_square = K.square(layer.weights[0])
+                new_mask = K.expand_dims(K.flatten(mask), axis=1)
+                new_mask = K.tile(new_mask, [1, 2])
+                # mask is higher for more probable locations, so cost is 1 - mask
+                loss = loss + K.sum((K.ones(new_mask.shape) - new_mask) * w_square)  # / (mask.shape[0] * mask.shape[-1])
+                return loss
+
+            return regularized_loss
+
+        if image_params is None:
+            image_params = {'image_size': None}
+
+        self.image_params = image_params
+        self.mask = mask
+        self.custom_loss=custom_loss
+        # first convolution layer
+
+        if model_type == 'basic':
+            self.image_params['image_size'] = (299, 299, 1)
+            image_input = Input(shape=self.image_params['image_size'])
+            conv1 = Conv2D(64, 3, activation='relu', padding='same', kernel_initializer='he_normal')(image_input)
+            conv1 = Conv2D(64, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv1)
+            pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
+            conv2 = Conv2D(128, 3, activation='relu', padding='same', kernel_initializer='he_normal')(pool1)
+            conv2 = Conv2D(128, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv2)
+            pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
+            conv3 = Conv2D(256, 3, activation='relu', padding='same', kernel_initializer='he_normal')(pool2)
+            conv3 = Conv2D(256, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv3)
+            pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
+            conv4 = Conv2D(512, 3, activation='relu', padding='same', kernel_initializer='he_normal')(pool3)
+            conv4 = Conv2D(512, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv4)
+            drop4 = Dropout(0.5)(conv4)
+            pool4 = MaxPooling2D(pool_size=(2, 2))(drop4)
+
+            conv5 = Conv2D(1024, 3, activation='relu', padding='same', kernel_initializer='he_normal')(pool4)
+            conv5 = Conv2D(1024, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv5)
+            drop5 = Dropout(0.5)(conv5)
+
+            up6 = Conv2D(512, 2, activation='relu', padding='same', kernel_initializer='he_normal')(
+                UpSampling2D(size=(2, 2))(drop5))
+            merge6 = concatenate([drop4, up6], axis=3)
+            conv6 = Conv2D(512, 3, activation='relu', padding='same', kernel_initializer='he_normal')(merge6)
+            conv6 = Conv2D(512, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv6)
+
+            up7 = Conv2D(256, 2, activation='relu', padding='same', kernel_initializer='he_normal')(
+                UpSampling2D(size=(2, 2))(conv6))
+            merge7 = concatenate([conv3, up7], axis=3)
+            conv7 = Conv2D(256, 3, activation='relu', padding='same', kernel_initializer='he_normal')(merge7)
+            conv7 = Conv2D(256, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv7)
+
+            up8 = Conv2D(128, 2, activation='relu', padding='same', kernel_initializer='he_normal')(
+                UpSampling2D(size=(2, 2))(conv7))
+            merge8 = concatenate([conv2, up8], axis=3)
+            conv8 = Conv2D(128, 3, activation='relu', padding='same', kernel_initializer='he_normal')(merge8)
+            conv8 = Conv2D(128, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv8)
+
+            up9 = Conv2D(64, 2, activation='relu', padding='same', kernel_initializer='he_normal')(
+                UpSampling2D(size=(2, 2))(conv8))
+            merge9 = concatenate([conv1, up9], axis=3)
+            conv9 = Conv2D(64, 3, activation='relu', padding='same', kernel_initializer='he_normal')(merge9)
+            conv9 = Conv2D(64, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv9)
+            conv9 = Conv2D(2, 3, activation='relu', padding='same', kernel_initializer='he_normal')(conv9)
+            conv10 = Conv2D(1, 1, activation='sigmoid')(conv9)
+
+            model = Model(input=image_input, output=conv10)
+
+        # compile
+        opt = optimizers.Adam(lr=0.0001)
+
+        self.model = model
+        if custom_loss:
+            self.model.compile(optimizer=opt, loss=positional_prior_categorical_crossentropy(mask, model.layers[-2]), metrics=['accuracy'])
+        else:
+            self.model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])
+
+
+    # training
+    def train(self, train_image_dir, validation_image_dir=None, n_epochs=10, batch_size=32, save_dir=None):
+
+        mc = ModelCheckpoint(filepath=os.path.join(save_dir, 'model.{epoch:02d}.hdf5'), monitor='val_loss',
+                             verbose=1, period=5)
+        tb = TensorBoard(log_dir=save_dir)
+        # es = EarlyStopping(patience=2, monitor='val_acc', mode='max', baseline=0.93)
+
+        # get the relative number of training examples from each class for weighting the loss function
+        n_per_class = [len(glob.glob(os.path.join(train_image_dir, label, '*.jpg'))) for label in self.classes]
+        n_val = len(glob.glob(os.path.join(validation_image_dir, '*', '*.jpg')))
+
+        tmp_weights = np.max(n_per_class)/n_per_class
+        class_weights = {}
+        for ind, w in enumerate(tmp_weights):
+            class_weights[ind] = w
+
+        n_train = np.sum(n_per_class)
+
+        image_params = self.image_params
+
+        image_params['image_dir'] = train_image_dir
+
+        train_image_generator = DataGenerator(image_params,
+                                              self.classes,  # labels need to match names of subfolders with images from that class
+                                              batch_size=batch_size,
+                                              shuffle=True,
+                                              mask=self.mask,
+                                              custom_loss=self.custom_loss)
+
+        image_params['image_dir'] = validation_image_dir
+
+        validation_image_generator = DataGenerator(image_params,
+                                                   self.classes,  # labels need to match names of subfolders with images from that class
+                                                   batch_size=batch_size,
+                                                   shuffle=True,
+                                                   mask=self.mask,
+                                                   custom_loss=self.custom_loss)
+
+        # Fit the model on the batches generated by datagen.flow().
+        self.model.fit_generator(train_image_generator,
+                                 steps_per_epoch=int(np.ceil(n_train / float(batch_size))),
+                                 epochs=n_epochs,
+                                 class_weight=class_weights,
+                                 validation_data=validation_image_generator,
+                                 validation_steps=int(np.ceil(n_val / float(batch_size))),
+                                 workers=12,
+                                 callbacks=[mc, tb])
+
+        self.model.save(os.path.join(save_dir, 'trained_fusion_model.h5'))
+
+    # prediction
+    def predict(self, test_image_image=None):
+
+        predictions = self.model.predict(test_image_image)
+        classes = self.classes
+
+        return predictions, classes

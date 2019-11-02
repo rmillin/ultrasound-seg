@@ -12,10 +12,10 @@ class DataGenerator(keras.utils.Sequence):
     """
     def __init__(self,
                  image_params,
-                 labels,  # labels need to match names of subfolders with images from that class
+                 classes,
+                 labels,
                  batch_size=32,
                  shuffle=True,
-                 mask=None,
                  custom_loss=False):
         """
         Constructor.
@@ -33,33 +33,35 @@ class DataGenerator(keras.utils.Sequence):
 
         # generate data
         image_dir = image_params['image_dir']
-        all_files = []
-        class_labels = np.empty((0, 1))
-        for ind, label in enumerate(labels):
-            # load and standardize image
-            image_files = glob.glob(os.path.join(image_dir, label, '*.jpg'))
-            # uncomment below for testing with small batch
-            # image_files = image_files[:100]
-            all_files.extend(image_files)
-            labels = np.ones((len(image_files), 1)) * ind
-            class_labels = np.concatenate((class_labels, labels), axis=0)
+        # get the list of label files, then for each find the matching image
+        all_label_files = glob.glob(os.path.join(image_dir, '*_mask.tif'))
+        # UNCOMMENT BELOW FOR TESTING
+        all_label_files = all_label_files[:50]
+        all_image_files = [file.replace('_mask', '') for file in all_label_files]
 
-        images = np.zeros(((len(all_files),) + self.image_shape[:2]), dtype=np.float32)
-        for count, image_file in enumerate(all_files):
-            if np.sum(self.image_shape):
-                print('loading image ' + str(count))
+        images = np.zeros(((len(all_image_files),) + self.image_shape[:2]), dtype=np.float32)
+        image_labels = np.zeros(((len(all_image_files),) + self.image_shape[:2]), dtype=np.float32)
+        for count, image_file in enumerate(all_image_files):
+            print('loading image ' + str(count))
+            try:
                 tmp_image = cv2.imread(image_file, 0)
-                # tmp_image = (tmp_image - np.mean(tmp_image))/np.std(tmp_image)
+                tmp_label = cv2.imread(all_label_files[count], 0)
                 tmp_image = cv2.resize(tmp_image, self.image_shape[:2])
-                # change to inverted image
-                # tmp_image = 255 - tmp_image
-                images[count, :, :] = np.expand_dims(tmp_image, axis=0)
+                tmp_label = cv2.resize(tmp_label, self.image_shape[:2])
+                tmp_label[tmp_label < 128] = 0
+                tmp_label[tmp_label >= 128] = 1
+            except:
+                print('Skipping ' + image_file)
+                continue
+            images[count, :, :] = np.expand_dims(tmp_image, axis=0)
+            image_labels[count, :, :] = np.expand_dims(tmp_label, axis=0)
 
-        self.labels = class_labels
+        self.labels = labels
+        self.classes = classes
         self.images = images
-        self.mask = mask
+        self.image_labels = image_labels
         self.custom_loss = custom_loss
-        self.n_samples = len(class_labels)
+        self.n_samples = len(images)
         self.indices = np.arange(self.n_samples)
         self.shuffle = shuffle
         self.on_epoch_end()
@@ -96,15 +98,13 @@ class DataGenerator(keras.utils.Sequence):
 
     def augment(self, image):
         # pick a random augmentation
-        randint = random.choice([0, 1, 2, 3])
+        randint = random.choice([0, 1, 2])
         if randint == 0:
-            image = np.fliplr(image)  # flip left right
-        elif randint == 1:
             gamma = random.choice([0.7, 0.8, 0.9, 1.1, 1.2, 1.3])
             image = image.copy().astype(np.uint8)
             t = (np.power(np.linspace(0, 1, 256), 1.0 / gamma) * 255).astype(np.uint8)
             image = cv2.LUT(image, t)  # gamma adjust
-        elif randint == 2:
+        elif randint == 1:
             kernel_size = random.choice([2, 3, 4, 5])
             image = cv2.blur(image, (kernel_size, kernel_size))
         else:
@@ -125,7 +125,7 @@ class DataGenerator(keras.utils.Sequence):
 
         # initialization
         image = np.empty((self.batch_size,) + self.image_shape, dtype=np.float32)
-        y = np.empty((self.batch_size,) + (1,), dtype=np.int32)
+        y = np.empty((self.batch_size,) + self.image_shape, dtype=np.int32)
 
         # generate data
         for ind, idx in enumerate(batch_indices):
@@ -141,10 +141,6 @@ class DataGenerator(keras.utils.Sequence):
                     tmp_image = tmp_image[:, :, :3]
                 image[ind] = tmp_image
                 # grab label
-                y[ind] = self.labels[idx]
-
-        y = keras.utils.to_categorical(y, num_classes=self.n_classes)
-        if (self.mask is not None) and not self.custom_loss:
-            return [image, self.mask], y
+                y[ind] = np.expand_dims(self.image_labels[idx], axis=2)
 
         return image, y

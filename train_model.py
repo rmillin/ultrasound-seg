@@ -31,7 +31,7 @@ model_type = 'basic'
 use_mask = True
 classes = ['background', 'nerve']
 labels = [0, 1]
-custom_loss = False
+custom_loss = True
 
 # training parameters
 n_epochs = 5
@@ -39,7 +39,7 @@ batch_size = 8
 image_params = {'image_size': (512, 512, 1)}
 
 # check if a model already exists; if so, load it; if not, create it
-bin_model = segmentation_model.BinaryModel(image_params, model_type, classes, labels, custom_loss)
+bin_model = segmentation_model.BinaryModel(image_params, model_type, classes, labels, custom_loss, batch_size=batch_size)
 
 try:
     model_checkpoint = glob.glob(os.path.join(save_dir, 'model*.hdf5'))[-1]

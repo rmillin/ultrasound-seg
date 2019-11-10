@@ -4,7 +4,6 @@ Option to build fusion, m-mode only, or d-mode only
 """
 
 from keras.models import Model
-from keras.losses import categorical_crossentropy
 from keras.layers import Input, Conv2D, MaxPooling2D, Dropout, UpSampling2D, concatenate
 from keras import optimizers, regularizers
 import keras.backend as K
@@ -22,34 +21,33 @@ class BinaryModel:
     # model type can be resnet, inception, or mobilenet
 
     def __init__(self, image_params, model_type='basic', classes=('background', 'foreground'), labels=(0, 1),
-                 custom_loss=False):
+                 custom_loss=False, batch_size=4):
         self.classes = classes
         self.labels = labels
+        self.batch_size = batch_size
 
         # Define custom loss
-        def positional_prior_categorical_crossentropy(mask, layer):
+        # Define custom loss
+        def weighted_crossentropy(size):
             """
-            cross-entropy loss with position-based penalty for weights
-            of the form L' = L + sumij(lambda(i,j) * sumk(w(i,j,k)))
-            where lambda(i,j) is the positional penalty and w(i,j,k) are the outputs of the final convolutional layer
+            cross-entropy loss with positive class up-weighted
+            of the form L = L * w if y == 1
             :param y: true label
             :param y_pred: predicted label
             :param mask: position-based weights for penalty
             :return: loss
             """
 
-            def regularized_loss(y_true, y_pred):
-                # start with basic cross-entropy loss
-                loss = categorical_crossentropy(y_true, y_pred)
-                # build the regularization term - sum squared output across features
-                w_square = K.square(layer.weights[0])
-                new_mask = K.expand_dims(K.flatten(mask), axis=1)
-                new_mask = K.tile(new_mask, [1, 2])
-                # mask is higher for more probable locations, so cost is 1 - mask
-                loss = loss + K.sum((K.ones(new_mask.shape) - new_mask) * w_square)  # / (mask.shape[0] * mask.shape[-1])
+            def weighted_loss(y_true, y_pred):
+                w = K.constant(np.ones(size))
+                w = K.maximum(w, y_true * 98)  # make weights for positive entries 98
+                w = w/K.sum(w)
+                # element-wise cross-entropy
+                e_ce = y_true * K.log(y_pred) + (1 - y_true) * K.log(1 - y_pred)
+                loss = K.sum(e_ce * w)
                 return loss
 
-            return regularized_loss
+            return weighted_loss
 
         if image_params is None:
             image_params = {'image_size': None}
@@ -115,7 +113,11 @@ class BinaryModel:
 
         self.model = model
         if custom_loss:
-            self.model.compile(optimizer=opt, loss=positional_prior_categorical_crossentropy([], model.layers[-2]), metrics=['accuracy'])
+            self.model.compile(optimizer=opt,
+                               loss=weighted_crossentropy([batch_size,
+                                                           image_params['image_size'][0],
+                                                           image_params['image_size'][1], 1]),
+                               metrics=['accuracy'])
         else:
             self.model.compile(optimizer=opt, loss='binary_crossentropy', metrics=['accuracy'])
 

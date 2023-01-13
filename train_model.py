@@ -10,40 +10,48 @@
 # [validation_dir]/effusion
 # [validation_dir]/no_effusion
 # [validation_dir]/consolidation
-# [validation_dir]/no_consolidation
+# [validation_dir]/no_consolidation/Users/rmillin/Documents/code/ultrasound-seg/venv/bin/python -m pip install
 
-import segmentation_model
+import models
 import pickle
 import os
 import glob
 
-from keras.models import load_model
+from tensorflow.keras.models import load_model
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "3"  # for training on gpu
+os.environ["KERAS_BACKEND"] = "tensorflow"
 
 # paths
-training_dir = r'/Users/rmillin/Documents/ultrasound-nerve-segmentation/train'
-validation_dir = r'/Users/rmillin/Documents/ultrasound-nerve-segmentation/val'
-save_dir = r'/Users/rmillin/Documents/ultrasound-nerve-segmentation/results/debug'
+training_dir = r'/Users/rmillin/Downloads/ultrasound-nerve-segmentation/train'
+validation_dir = r'/Users/rmillin/Downloads/ultrasound-nerve-segmentation/val'
+save_dir = r'/Users/rmillin/Downloads/ultrasound-nerve-segmentation/results/debug/dice'
 
 # model parameters
+model_task = 'segmentation' # classification or segmentation
 model_type = 'basic'
-use_mask = True
 classes = ['background', 'nerve']
 labels = [0, 1]
-custom_loss = True
+loss = 'dice'
 
 # training parameters
-n_epochs = 5
-batch_size = 8
-image_params = {'image_size': (512, 512, 1)}
+n_epochs = 20
+batch_size = 4
+# batch_size = 16
+image_params = {'image_size': (128, 128, 1)}
 
 # check if a model already exists; if so, load it; if not, create it
-bin_model = segmentation_model.BinaryModel(image_params, model_type, classes, labels, custom_loss, batch_size=batch_size)
+if model_task == 'classification':
+    bin_model = models.ClassificationModel(image_params, model_type, classes, labels, loss, batch_size=batch_size)
+elif model_task == 'segmentation':
+    bin_model = models.SegmentationModel(image_params, model_type, classes, labels, loss, batch_size=batch_size)
+else:
+    raise('Unrecognized model task, exiting')
+
 
 try:
-    model_checkpoint = glob.glob(os.path.join(save_dir, 'model*.hdf5'))[-1]
-    keras_model = load_model(os.path.join(save_dir, model_checkpoint))
+    model_checkpoint = glob.glob(os.path.join(save_dir, '*.h5'))[-1]
+    keras_model = load_model(model_checkpoint)
     bin_model.model = keras_model
     print('Loaded existing model to continue training.')
 except:

@@ -52,7 +52,7 @@ def deform_frame(frame, num_pts=5, std_displacement=20, mean_displacement=0):
 
 if __name__ == '__main__':
 
-    frame_path = r'\\adler.intvenlab.com\shared\Research and Engineering\Data for Projects\DARPA Ultrasound\Data\rmillin\frame_classification\frames\curated\val\effusion\image_19414344879311_34.jpg'
+    frame_path = r'\Users\rmillin\test.jpg'
     frame = cv2.imread(frame_path)
     frame = frame[:, :, 0]
     deformed_frame = deform_frame(frame)

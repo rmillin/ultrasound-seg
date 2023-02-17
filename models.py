@@ -15,12 +15,10 @@ import os
 import custom_losses as cls
 
 from data_generator import SegmentationDataGenerator, ClassificationDataGenerator
+from model_components import create_vit_classifier
 
 
 class SegmentationModel:
-    # class defining the multilabel model.
-    # functions for defining the model, training, and prediction
-    # model type can be resnet, inception, or mobilenet
 
     def __init__(self, image_params, model_type='basic', classes=('background', 'foreground'), labels=(0, 1),
                  loss='weighted_ce', batch_size=4):
@@ -192,7 +190,7 @@ class SegmentationModel:
                                  workers=12,
                                  callbacks=[mc, tb])
 
-        self.model.save(os.path.join(save_dir, 'trained_fusion_model.h5'))
+        self.model.save(os.path.join(save_dir, 'trained_model.h5'))
 
     # prediction
     def predict(self, test_image_image=None):
@@ -204,8 +202,6 @@ class SegmentationModel:
 
 
 class ClassificationModel:
-    # class defining the multilabel model.
-    # functions for defining the model, training, and prediction
 
     def __init__(self, image_params, model_type='basic', classes=('no nerve', 'nerve'), labels=(0, 1),
                  loss='weighted_ce', batch_size=4):
@@ -275,7 +271,16 @@ class ClassificationModel:
                 inputs=image_input,
                 outputs=output)
 
-
+        elif model_type == 'transformer':
+            model = create_vit_classifier(num_classes,
+                                  input_shape,
+                                  patch_size,
+                                  num_patches,
+                                  projection_dim,
+                                  transformer_layers,
+                                  num_heads,
+                                  transformer_units,
+                                  mlp_head_units)
         else:
             raise('Unrecognized model type requested.')
 
@@ -327,7 +332,7 @@ class ClassificationModel:
                                  workers=12,
                                  callbacks=[mc, tb])
 
-        self.model.save(os.path.join(save_dir, 'trained_fusion_model.h5'))
+        self.model.save(os.path.join(save_dir, 'trained_model.h5'))
 
     # prediction
     def predict(self, test_image_image=None):

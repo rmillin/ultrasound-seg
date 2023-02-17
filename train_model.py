@@ -1,17 +1,3 @@
-# script for training the binary model (duh)
-
-# images need to be saved with the following directory structure:
-
-# [training_dir]/effusion
-# [training_dir]/no_effusion
-# [training_dir]/consolidation
-# [training_dir]/no_consolidation
-
-# [validation_dir]/effusion
-# [validation_dir]/no_effusion
-# [validation_dir]/consolidation
-# [validation_dir]/no_consolidation/Users/rmillin/Documents/code/ultrasound-seg/venv/bin/python -m pip install
-
 import models
 import pickle
 import os

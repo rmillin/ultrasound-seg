@@ -3,9 +3,10 @@ import glob
 import os
 import cv2
 import random
-from tensorflow import keras
 
+from tensorflow import keras
 from scipy.interpolate import griddata
+from deform_image import deform_frame
 
 
 def deform_frame(frame, num_pts=5, std_displacement=20, mean_displacement=0):
@@ -52,6 +53,11 @@ def deform_frame(frame, num_pts=5, std_displacement=20, mean_displacement=0):
     return deformed_frame
 
 
+"""
+Below code adpated from DataGenerator written by Courosh Mehanian
+"""
+
+
 class SegmentationDataGenerator(keras.utils.Sequence):
     """
     Generates data for Keras
@@ -65,9 +71,6 @@ class SegmentationDataGenerator(keras.utils.Sequence):
                  loss='binary_ce'):
         """
         Constructor.
-        If augmenting, batch size will be the video batch size; number of m-/d-mode samples will be multiplied.
-        If starting from video, video_params must be provided
-        Otherwise, if using fusion model, image_params and d_mode_params must be provided; otherwise only the corresponding params
         """
 
         if image_params is not None:
@@ -207,9 +210,6 @@ class ClassificationDataGenerator(keras.utils.Sequence):
                  augment=True):
         """
         Constructor.
-        If augmenting, batch size will be the video batch size; number of m-/d-mode samples will be multiplied.
-        If starting from video, video_params must be provided
-        Otherwise, if using fusion model, image_params and d_mode_params must be provided; otherwise only the corresponding params
         """
 
         if image_params is not None:
